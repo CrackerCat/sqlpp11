@@ -33,6 +33,7 @@
 #include <string>
 #include <cstring>
 
+#include <pg_config.h>
 #include <libpq-fe.h>
 
 #include <sqlpp11/postgresql/visibility.h>
@@ -68,25 +69,76 @@ namespace sqlpp
       void operator=(PGresult* res);
       operator bool() const;
 
-      template <typename T = const char*>
-      inline T getValue(int record, int field) const
+      inline int64_t getInt64Value(int record, int field) const
       {
-        static_assert(std::is_arithmetic<T>::value, "Value must be numeric type");
         checkIndex(record, field);
-        T t(0);
+        auto t = int64_t{};
+        const auto txt = std::string(getPqValue(m_result, record, field));
+        if(txt != "")
+        {
+          t = std::stoll(txt);
+        }
+
+        return t;
+      }
+
+      inline uint64_t getUInt64Value(int record, int field) const
+      {
+        checkIndex(record, field);
+        auto t = uint64_t{};
+        const auto txt = std::string(getPqValue(m_result, record, field));
+        if(txt != "")
+        {
+          t = std::stoull(txt);
+        }
+
+        return t;
+      }
+
+      inline double getDoubleValue(int record, int field) const
+      {
+        checkIndex(record, field);
+        auto t = double{};
         auto txt = std::string(getPqValue(m_result, record, field));
         if(txt != "")
-
         {
-          t = std::stold(txt);
+          t = std::stod(txt);
         }
+
         return t;
+      }
+
+      inline const char* getCharPtrValue(int record, int field) const
+      {
+        return const_cast<const char*>(getPqValue(m_result, record, field));
+      }
+
+      inline std::string getStringValue(int record, int field) const
+      {
+        return {getCharPtrValue(record, field)};
+      }
+
+      inline const uint8_t* getBlobValue(int record, int field) const
+      {
+        return reinterpret_cast<const uint8_t*>(getPqValue(m_result, record, field));
+      }
+
+      inline bool getBoolValue(int record, int field) const
+      {
+        checkIndex(record, field);
+        auto val = getPqValue(m_result, record, field);
+        if (*val == 't')
+          return true;
+        else if (*val == 'f')
+          return false;
+        return const_cast<const char*>(val);
       }
 
       const std::string& query() const
       {
         return m_query;
       }
+
       std::string& query()
       {
         return m_query;
@@ -108,36 +160,6 @@ namespace sqlpp
       std::string m_query;
     };
 
-    template <>
-    inline const char* Result::getValue<const char*>(int record, int field) const
-    {
-      return const_cast<const char*>(getPqValue(m_result, record, field));
-    }
-
-    template <>
-    inline std::string Result::getValue<std::string>(int record, int field) const
-    {
-      return {getValue<const char*>(record, field)};
-    }
-
-    template <>
-    inline bool Result::getValue<bool>(int record, int field) const
-    {
-      checkIndex(record, field);
-      auto val = getPqValue(m_result, record, field);
-      if (*val == 't')
-        return true;
-      else if (*val == 'f')
-        return false;
-      return const_cast<const char*>(val);
-    }
-
-
-    template <>
-    inline const uint8_t* Result::getValue<const uint8_t*>(int record, int field) const
-    {
-      return reinterpret_cast<const uint8_t*>(getValue<const char*>(record, field));
-    }
 
     inline Result::Result() : m_result(nullptr)
     {
@@ -278,8 +300,15 @@ namespace sqlpp
         case PGRES_FATAL_ERROR:
           Err = PQresultErrorMessage(m_result);
           break;
+#if PG_MAJORVERSION_NUM >= 13
         case PGRES_COPY_BOTH:
         case PGRES_SINGLE_TUPLE:
+#endif
+#if PG_MAJORVERSION_NUM >= 14
+        case PGRES_PIPELINE_SYNC:
+        case PGRES_PIPELINE_ABORTED:
+#endif
+        default:
           throw sqlpp::exception("pqxx::result: Unrecognized response code " +
                                  std::to_string(PQresultStatus(m_result)));
       }
